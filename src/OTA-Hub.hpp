@@ -123,12 +123,18 @@ namespace OTA
         }
     }
 
-    void printFirmwareDetails(Stream *print_stream = &Serial)
+    void printFirmwareDetails(Stream *print_stream = &Serial, const char *latest_tag = nullptr)
     {
         print_stream->println("------------------------");
         print_stream->println("Device MAC: " + getMacAddress());
-        print_stream->println("Firmware Version: " + String(OTA_VERSION));
+        print_stream->println("Firmware Version (OTA_VERSION): " + String(OTA_VERSION));
         print_stream->println("Firmware Compilation Date: " + String(__DATE__) + ", " + String(__TIME__));
+
+        if (latest_tag != nullptr)
+        {
+            print_stream->println("Latest Release Tag (GitHub): " + String(latest_tag));
+        }
+
         print_stream->println("------------------------");
     }
 
@@ -216,9 +222,12 @@ namespace OTA
             return_object.tag_name = release_response["tag_name"].as<String>();
             return_object.published_at = http_ota->formatTimeFromISO8601(release_response["published_at"].as<String>());
 
-            // Evaluate comparison based on metadata
-            bool update_is_different = release_response["name"].as<String>().compareTo(OTA_VERSION) != 0;
+            // ✅ Compare OTA_VERSION against tag_name, not name
+            bool update_is_different = return_object.tag_name.compareTo(OTA_VERSION) != 0;
             bool update_is_newer = release_response["published_at"].as<time_t>() > cvtDate();
+
+            // ✅ Print both local firmware version and GitHub tag for debugging
+            printFirmwareDetails(&Serial, return_object.tag_name.c_str());
 
             JsonArray asset_array = release_response["assets"].as<JsonArray>();
             for (JsonVariant v : asset_array)
@@ -226,7 +235,9 @@ namespace OTA
                 if (v["name"].as<String>().compareTo(FIRMWARE_BIN_MATCH) == 0)
                 {
                     return_object.firmware_asset_id = v["id"].as<String>();
-                    return_object.condition = update_is_different ? (update_is_newer ? NEW_DIFFERENT : OLD_DIFFERENT) : (update_is_newer ? NEW_SAME : NO_UPDATE);
+                    return_object.condition = update_is_different
+                                                  ? (update_is_newer ? NEW_DIFFERENT : OLD_DIFFERENT)
+                                                  : (update_is_newer ? NEW_SAME : NO_UPDATE);
                     return_object.firmware_asset_endpoint = OTA_ASSET_ENDPOINT_CONSTRUCTOR(return_object.firmware_asset_id);
                     return return_object;
                 }
