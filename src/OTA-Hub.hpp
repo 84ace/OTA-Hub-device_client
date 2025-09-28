@@ -195,13 +195,38 @@ namespace OTA
 
         if (response.success())
         {
-            // Compile into a JSON doc
+            // The releases endpoint returns an array, so we need to process it as such.
 #if ARDUINOJSON_VERSION_MAJOR >= 7
-            JsonDocument release_response;
+            JsonDocument doc;
 #else
-            DynamicJsonDocument release_response(8129);
+            DynamicJsonDocument doc(16384); // Increased size for potential larger array
 #endif
-            deserializeJson(release_response, response.body);
+            deserializeJson(doc, response.body);
+
+            JsonObject release_response;
+            if (doc.is<JsonArray>())
+            {
+                JsonArray release_array = doc.as<JsonArray>();
+                if (release_array.size() == 0)
+                {
+                    Serial.println("No releases found in the repository.");
+                    return return_object;
+                }
+                // The first element in the array is the latest release.
+                release_response = release_array[0].as<JsonObject>();
+            }
+            else
+            {
+                // Fallback for if the API ever goes back to a single object for /latest
+                release_response = doc.as<JsonObject>();
+            }
+
+            if (release_response.isNull())
+            {
+                Serial.println("Failed to parse release information.");
+                return return_object;
+            }
+
             if (
 #if ARDUINOJSON_VERSION_MAJOR >= 7
                 release_response["name"].isNull() ||
@@ -222,11 +247,11 @@ namespace OTA
             return_object.tag_name = release_response["tag_name"].as<String>();
             return_object.published_at = http_ota->formatTimeFromISO8601(release_response["published_at"].as<String>());
 
-            // ✅ Compare OTA_VERSION against tag_name, not name
+            // Compare OTA_VERSION against tag_name, not name
             bool update_is_different = return_object.tag_name.compareTo(OTA_VERSION) != 0;
             bool update_is_newer = release_response["published_at"].as<time_t>() > cvtDate();
 
-            // ✅ Print both local firmware version and GitHub tag for debugging
+            // Print both local firmware version and GitHub tag for debugging
             printFirmwareDetails(&Serial, return_object.tag_name.c_str());
 
             JsonArray asset_array = release_response["assets"].as<JsonArray>();
